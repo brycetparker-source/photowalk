@@ -14,6 +14,7 @@
       --accent: #38bdf8;
       --accent-warn: #f59e0b;
       --accent-alert: #ef4444;
+      --accent-purple: #a855f7;
     }
 
     * {
@@ -57,7 +58,7 @@
     }
 
     .status-panel {
-      margin: 1.5rem 0;
+      margin: 1.5rem 0 1rem 0;
       padding: 1.5rem;
       border-radius: 1rem;
       background: rgba(0, 0, 0, 0.25);
@@ -130,11 +131,17 @@
       font-size: 1rem;
       font-weight: 700;
       cursor: pointer;
-      transition: transform 0.1s ease, filter 0.2s ease;
+      transition: transform 0.1s ease, opacity 0.2s ease;
     }
 
     button:active {
       transform: scale(0.97);
+    }
+
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      transform: none;
     }
 
     .btn-start {
@@ -145,6 +152,18 @@
     .btn-stop {
       background: #334155;
       color: #fff;
+    }
+
+    .btn-trigger {
+      width: 100%;
+      margin-bottom: 1rem;
+      background: var(--accent-purple);
+      color: #fff;
+      padding: 0.85rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
     }
 
     .state-walking {
@@ -178,6 +197,11 @@
       <div id="timerDisplay" class="timer-display">--:--</div>
       <div id="promptBox" class="prompt-box"></div>
     </div>
+
+    <!-- Quickdraw Trigger Button -->
+    <button class="btn-trigger" id="triggerBtn" disabled>
+      ⚡ Trigger Prompt Now
+    </button>
 
     <div class="btn-row">
       <button class="btn-start" id="startBtn">Start Walk</button>
@@ -237,6 +261,7 @@
 
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
+    const triggerBtn = document.getElementById('triggerBtn');
     const timerDisplay = document.getElementById('timerDisplay');
     const modeLabel = document.getElementById('modeLabel');
     const promptBox = document.getElementById('promptBox');
@@ -285,6 +310,7 @@
     }
 
     function startRandomPhase() {
+      triggerBtn.disabled = false;
       promptBox.style.display = 'none';
       modeLabel.textContent = "Photo Walk in Progress";
       modeLabel.className = "mode-label state-walking";
@@ -309,6 +335,9 @@
     }
 
     function startChallengePhase() {
+      clearInterval(currentInterval);
+      triggerBtn.disabled = true;
+
       playBeep(880, 0.3, 3);
       if (navigator.vibrate) {
         navigator.vibrate([300, 150, 300, 150, 500]);
@@ -324,7 +353,6 @@
       timeRemaining = 60;
       timerDisplay.textContent = formatTime(timeRemaining);
 
-      clearInterval(currentInterval);
       currentInterval = setInterval(() => {
         timeRemaining--;
         timerDisplay.textContent = formatTime(timeRemaining);
@@ -351,11 +379,16 @@
       startRandomPhase();
     });
 
+    triggerBtn.addEventListener('click', () => {
+      startChallengePhase();
+    });
+
     stopBtn.addEventListener('click', () => {
       clearInterval(currentInterval);
       releaseScreenLock();
       startBtn.disabled = false;
       stopBtn.disabled = true;
+      triggerBtn.disabled = true;
       minInput.disabled = false;
       maxInput.disabled = false;
       promptBox.style.display = 'none';
