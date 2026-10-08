@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Photo Walk Radar</title>
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#0f172a" />
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #f8fafc;
+      --accent: #38bdf8;
+      --accent-warn: #f59e0b;
+      --accent-alert: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 1.5rem;
+      text-align: center;
+    }
+    .container {
+      width: 100%;
+      max-width: 520px;
+      background: var(--card);
+      border-radius: 1.25rem;
+      padding: 2rem;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    }
+    h1 { font-size: 1.75rem; margin-bottom: 0.5rem; color: var(--accent); }
+    .subtitle { font-size: 0.9rem; opacity: 0.75; margin-bottom: 1.5rem; }
+    .status-panel {
+      margin: 1.5rem 0;
+      padding: 1.5rem;
+      border-radius: 1rem;
+      background: rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      min-height: 180px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+    }
+    .timer-display {
+      font-size: 3.5rem;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      margin-bottom: 0.5rem;
+    }
+    .mode-label {
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-size: 0.85rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+    .prompt-box {
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: var(--accent-warn);
+      line-height: 1.4;
+      display: none;
+    }
+    .controls-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      text-align: left;
+      font-size: 0.85rem;
+    }
+    .input-group label { display: block; margin-bottom: 0.3rem; opacity: 0.8; }
+    .input-group input {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid #334155;
+      color: #fff;
+      padding: 0.5rem;
+      border-radius: 0.5rem;
+      font-size: 1rem;
+    }
+    .btn-row { display: flex; gap: 0.75rem; }
+    button {
+      flex: 1;
+      padding: 0.9rem;
+      border-radius: 0.75rem;
+      border: none;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:active { transform: scale(0.97); }
+    .btn-start { background: var(--accent); color: #0f172a; }
+    .btn-stop { background: #334155; color: #fff; }
+    .state-walking { color: var(--accent); }
+    .state-challenge { color: var(--accent-alert); }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h1>Photo Walk Radar</h1>
+    <p class="subtitle">Spontaneous composition drills</p>
+
+    <div class="controls-grid" id="settingsGrid">
+      <div class="input-group">
+        <label for="minWait">Min Wait (min)</label>
+        <input type="number" id="minWait" value="3" min="1" max="60" />
+      </div>
+      <div class="input-group">
+        <label for="maxWait">Max Wait (min)</label>
+        <input type="number" id="maxWait" value="7" min="1" max="60" />
+      </div>
+    </div>
+
+    <div class="status-panel">
+      <div id="modeLabel" class="mode-label">Ready</div>
+      <div id="timerDisplay" class="timer-display">--:--</div>
+      <div id="promptBox" class="prompt-box"></div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-start" id="startBtn">Start Walk</button>
+      <button class="btn-stop" id="stopBtn" disabled>Reset</button>
+    </div>
+  </div>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js');
+    }
+
+    const prompts = [
+      "Find an intentional frame within a frame.",
+      "Capture strong leading lines directing the eye off-frame.",
+      "Extreme low-angle perspective (camera close to ground).",
+      "Isolate high-contrast harsh light and deep shadows.",
+      "Capture an unposed, candid interaction or movement.",
+      "Fill the entire frame with a repeating pattern or texture.",
+      "Shoot a subject using extreme negative space.",
+      "Reflections: water puddle, window, mirror, or metallic surface.",
+      "Shoot directly toward the light source and control flare.",
+      "A pop of a single vibrant color against a neutral background.",
+      "Capture dynamic diagonal geometry or architecture.",
+      "Worm's-eye view looking straight up."
+    ];
+
+    let currentInterval = null;
+    let timeRemaining = 0;
+    let audioCtx = null;
+    let wakeLock = null;
+
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const timerDisplay = document.getElementById('timerDisplay');
+    const modeLabel = document.getElementById('modeLabel');
+    const promptBox = document.getElementById('promptBox');
+    const minInput = document.getElementById('minWait');
+    const maxInput = document.getElementById('maxWait');
+
+    async function keepScreenOn() {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
+        }
+      } catch (err) {}
+    }
+
+    function releaseScreenLock() {
+      if (wakeLock) {
+        wakeLock.release().then(() => { wakeLock = null; });
+      }
+    }
+
+    function initAudio() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+    }
+
+    function playBeep(frequency = 600, duration = 0.2, count = 1) {
+      if (!audioCtx) return;
+      for (let i = 0; i < count; i++) {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.frequency.value = frequency;
+        osc.start(audioCtx.currentTime + (i * 0.25));
+        gain.gain.setValueAtTime(0.3, audioCtx.currentTime + (i * 0.25));
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (i * 0.25) + duration);
+        osc.stop(audioCtx.currentTime + (i * 0.25) + duration);
+      }
+    }
+
+    function formatTime(seconds) {
+      const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+      const s = (seconds % 60).toString().padStart(2, '0');
+      return `${m}:${s}`;
+    }
+
+    function startRandomPhase() {
+      promptBox.style.display = 'none';
+      modeLabel.textContent = "Photo Walk in Progress";
+      modeLabel.className = "mode-label state-walking";
+
+      const min = Math.max(1, parseInt(minInput.value, 10));
+      const max = Math.max(min, parseInt(maxInput.value, 10));
+      const waitSeconds = Math.floor(Math.random() * ((max - min) * 60 + 1)) + (min * 60);
+
+      timeRemaining = waitSeconds;
+      timerDisplay.textContent = formatTime(timeRemaining);
+
+      clearInterval(currentInterval);
+      currentInterval = setInterval(() => {
+        timeRemaining--;
+        timerDisplay.textContent = formatTime(timeRemaining);
+
+        if (timeRemaining <= 0) {
+          clearInterval(currentInterval);
+          startChallengePhase();
+        }
+      }, 1000);
+    }
+
+    function startChallengePhase() {
+      playBeep(880, 0.3, 3);
+      if (navigator.vibrate) {
+        navigator.vibrate([300, 150, 300, 150, 500]);
+      }
+
+      const prompt = prompts[Math.floor(Math.random() * prompts.length)];
+      promptBox.textContent = `“${prompt}”`;
+      promptBox.style.display = 'block';
+
+      modeLabel.textContent = "⚡ Flash Prompt (1 Min)";
+      modeLabel.className = "mode-label state-challenge";
+
+      timeRemaining = 60;
+      timerDisplay.textContent = formatTime(timeRemaining);
+
+      clearInterval(currentInterval);
+      currentInterval = setInterval(() => {
+        timeRemaining--;
+        timerDisplay.textContent = formatTime(timeRemaining);
+
+        if (timeRemaining === 3 || timeRemaining === 2 || timeRemaining === 1) {
+          playBeep(440, 0.1, 1);
+        }
+
+        if (timeRemaining <= 0) {
+          clearInterval(currentInterval);
+          playBeep(300, 0.5, 2);
+          startRandomPhase();
+        }
+      }, 1000);
+    }
+
+    startBtn.addEventListener('click', () => {
+      initAudio();
+      keepScreenOn();
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      minInput.disabled = true;
+      maxInput.disabled = true;
+      startRandomPhase();
+    });
+
+    stopBtn.addEventListener('click', () => {
+      clearInterval(currentInterval);
+      releaseScreenLock();
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      minInput.disabled = false;
+      maxInput.disabled = false;
+      promptBox.style.display = 'none';
+      modeLabel.textContent = "Ready";
+      modeLabel.className = "mode-label";
+      timerDisplay.textContent = "--:--";
+    });
+  </script>
+</body>
+</html>
